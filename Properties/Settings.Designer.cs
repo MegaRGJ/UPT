@@ -34,5 +34,41 @@ namespace UnrealProjectTool.Properties {
                 this["SavedLastProjectPath"] = value;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastP4Server {
+            get {
+                return ((string)(this["LastP4Server"]));
+            }
+            set {
+                this["LastP4Server"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastP4User {
+            get {
+                return ((string)(this["LastP4User"]));
+            }
+            set {
+                this["LastP4User"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastP4Workspace {
+            get {
+                return ((string)(this["LastP4Workspace"]));
+            }
+            set {
+                this["LastP4Workspace"] = value;
+            }
+        }
     }
 }

@@ -6,8 +6,9 @@ using System.IO;
 using System.Diagnostics;
 using System.Linq;
 using System.IO.Compression;
-using System.Text.RegularExpressions;
 using UnrealProjectTool.Properties;
+
+using System.Reflection;
 
 namespace UnrealProjectTool
 {
@@ -33,6 +34,11 @@ namespace UnrealProjectTool
         private System.ComponentModel.IContainer components;
         private Panel ProjectInfoPanel;
 
+        private Form SourceScanOutput = new Form();
+        private UProjectWorker ProjectWorker;
+        static string EmptyModuleToken = @"Empty";
+
+        public static bool UsePersistance = true;
         public MainForm()
         {
             InitializeComponent();
@@ -308,6 +314,8 @@ namespace UnrealProjectTool
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+            this.Text = "Unreal Project Tool";
+            this.Load += new System.EventHandler(this.MainForm_Load);
             this.Shown += new System.EventHandler(this.MainForm_Shown);
             this.MainFormLayoutPanel.ResumeLayout(false);
             this.MainFormLayoutPanel.PerformLayout();
@@ -328,6 +336,15 @@ namespace UnrealProjectTool
 
         }
 
+        private void MainForm_Shown(Object sender, EventArgs e)
+        {
+            string path = Settings.Default.SavedLastProjectPath;
+            if (path != "")
+            {
+                SetupProjectWorker(path);
+            }
+        }
+
         //Find a Uproject file to open
         private void BindProjectButton_Click(object sender, EventArgs e)
         {
@@ -346,7 +363,7 @@ namespace UnrealProjectTool
             {
                 SetupProjectWorker(BoundProjectDir);
 
-                if (true)
+                if (MainForm.UsePersistance)
                 {
                     Settings.Default.SavedLastProjectPath = BoundProjectDir;
                     Settings.Default.Save();
@@ -357,31 +374,38 @@ namespace UnrealProjectTool
         //Critical - caches all paths and files all necessary files
         private void SetupProjectWorker(string InBoundProjectDir)
         {
-            //Critical - caches all paths and files all necessary files
             ProjectWorker = new UProjectWorker(InBoundProjectDir);
 
-            BoundProjectLabel.Text = "Project found at: " + InBoundProjectDir;
+            ProjectWorker.OnProjectInitialised = delegate ()
+            {
+                BoundProjectLabel.Text = "Project found at: " + InBoundProjectDir;
 
-            BuildProjectInfoPanel();
-            BuildModulePanel();
+                BuildProjectInfoPanel();
+                BuildModulePanel();
+            };
+
+            ProjectWorker.Initialise();
         }
 
         private void BuildProjectInfoPanel()
         {
+            //Change title bar to represent any connected P4 connections
+            Text = "Unreal Project Tool" + ProjectWorker.RepoAsString();
+
             ProjectInfoPanel.Controls.Clear();
             ProjectInfoPanel.Visible = true;
-            
+
             List<Label> NewLabels = new List<Label>();
 
             Label ProjectNameLabel = new Label();
             Label CopywriteLabel = new Label();
-            Label ProjectVersionLabel = new Label();    
+            Label ProjectVersionLabel = new Label();
             NewLabels.Insert(0, ProjectNameLabel);
             NewLabels.Insert(0, CopywriteLabel);
             NewLabels.Insert(0, ProjectVersionLabel);
 
             ProjectNameLabel.Text = "Project Name: " + ProjectWorker.DefaultGameConfigReader.GetValForKey(@"ProjectName");
-            CopywriteLabel.Text = "Copywrite Notice: " + ProjectWorker.DefaultGameConfigReader.GetValForKey(@"CopyrightNotice");
+            CopywriteLabel.Text = "Copyright Notice: " + ProjectWorker.DefaultGameConfigReader.GetValForKey(@"CopyrightNotice");
             ProjectVersionLabel.Text = "Project Version: " + ProjectWorker.DefaultGameConfigReader.GetValForKey(@"ProjectVersion");
 
             foreach (Label NewLabel in NewLabels)
@@ -420,12 +444,12 @@ namespace UnrealProjectTool
         {
             DialogResult Result = MessageBox.Show(@"This operation may take a while, would you like to proceed?", @"Fixup Copyright", MessageBoxButtons.YesNo);
 
-            if(Result == DialogResult.Yes)
+            if (Result == DialogResult.Yes)
             {
                 StartSourceScan();
             }
-        }   
-        
+        }
+
         private void StartSourceScan()
         {
             SourceScanOutput = new Form();
@@ -452,7 +476,7 @@ namespace UnrealProjectTool
 
             foreach (string File in Files)
             {
-                Label CurrentFileLabel = new Label();   
+                Label CurrentFileLabel = new Label();
                 CurrentFileLabel.ForeColor = Color.White;
 
                 CurrentFileLabel.Dock = DockStyle.Top;
@@ -482,7 +506,7 @@ namespace UnrealProjectTool
                 FileNum++;
             }
 
-            if(InvalidFiles.Count > 0)
+            if (InvalidFiles.Count > 0)
             {
                 string InvalidFileList = System.Environment.NewLine;
 
@@ -491,9 +515,9 @@ namespace UnrealProjectTool
                     InvalidFileList += InvalidFile.Key + System.Environment.NewLine;
                 }
 
-                DialogResult Result = MessageBox.Show(@"Would you like to correct the copyright notice on " + InvalidFiles.Count + " files?", @"Fixup Files",  MessageBoxButtons.YesNo);
+                DialogResult Result = MessageBox.Show(@"Would you like to correct the copyright notice on " + InvalidFiles.Count + " files?", @"Fixup Files", MessageBoxButtons.YesNo);
 
-                if(Result == DialogResult.Yes || Result == DialogResult.No)
+                if (Result == DialogResult.Yes || Result == DialogResult.No)
                 {
                     SourceScanOutput.Close();
                 }
@@ -505,7 +529,7 @@ namespace UnrealProjectTool
             }
         }
 
-        private bool CheckFileHasCorrectCopyright(string InFile, out string IncorrectFirstLine) 
+        private bool CheckFileHasCorrectCopyright(string InFile, out string IncorrectFirstLine)
         {
             string FirstLine = File.ReadLines(InFile).First();
             string CopyrightNotice = ProjectWorker.DefaultGameConfigReader.GetValForKey(@"CopyrightNotice");
@@ -522,10 +546,13 @@ namespace UnrealProjectTool
 
         private void TryApplyCopyrightToFiles(Dictionary<string, string> InFiles)
         {
+            //Create a new Filespec list for potential checkouts
+            List<Perforce.P4.FileSpec> NewFiles = new List<Perforce.P4.FileSpec>();
+
             string NewCopyrightLine = "// " + ProjectWorker.DefaultGameConfigReader.GetValForKey(@"CopyrightNotice");
 
             int NumFixes = 0;
-            foreach(KeyValuePair<string, string> FilePair in InFiles)
+            foreach (KeyValuePair<string, string> FilePair in InFiles)
             {
                 string CurrentFirstLine = FilePair.Value;
                 string[] FileCopy = File.ReadAllLines(FilePair.Key);
@@ -536,7 +563,7 @@ namespace UnrealProjectTool
 
                     FileCopy[0] = NewCopyrightLine;
 
-                    if(FileCopy[1] != "")
+                    if (FileCopy[1] != "")
                     {
                         List<string> CopyAsList = new List<string>();
                         CopyAsList = FileCopy.ToList<string>();
@@ -546,6 +573,8 @@ namespace UnrealProjectTool
                     }
 
                     WriteToFile(FilePair.Key, FileCopy);
+                    NewFiles.Add(new Perforce.P4.FileSpec(new Perforce.P4.LocalPath(FilePair.Key)));
+
                     NumFixes++;
                 }
                 else if (CurrentFirstLine.Contains(@"#") || CurrentFirstLine.Contains(@"using"))
@@ -561,6 +590,8 @@ namespace UnrealProjectTool
                     FileCopy = CopyAsList.ToArray();
 
                     WriteToFile(FilePair.Key, FileCopy);
+                    NewFiles.Add(new Perforce.P4.FileSpec(new Perforce.P4.LocalPath(FilePair.Key)));
+
                     NumFixes++;
                 }
                 else
@@ -570,10 +601,26 @@ namespace UnrealProjectTool
             }
 
             MessageBox.Show("Fixed up " + NumFixes + " files", @"Copyright fixup results");
+
+            //Create a CL for our new files
+            if (ProjectWorker.ConnectedRepo != null)
+            {
+                Perforce.P4.Changelist NewChangelist = new Perforce.P4.Changelist();
+                NewChangelist.Type = ChangeListType.Restricted;
+                NewChangelist.Description = "[Copyright] Fixedup Copyright";
+                Perforce.P4.Changelist CreatedChangelist = ProjectWorker.ConnectedRepo.CreateChangelist(NewChangelist);
+
+                Perforce.P4.Options EditOptions = new Perforce.P4.Options();
+                EditOptions["-c"] = String.Format("{0}", CreatedChangelist.Id);
+                ProjectWorker.ConnectedRepo.Connection.Client.EditFiles(EditOptions, NewFiles.ToArray());
+            }
         }
 
         private void WriteToFile(string InPath, string[] NewFileText)
         {
+            System.IO.FileInfo PrimaryBuildFileInfo = new System.IO.FileInfo(InPath);
+            PrimaryBuildFileInfo.IsReadOnly = false;
+
             System.IO.File.WriteAllLines(InPath, NewFileText);
         }
 
@@ -588,81 +635,117 @@ namespace UnrealProjectTool
             ModuleForm.OnNewModuleCreated = OnNewModuleCreated;
         }
 
-        private void OnNewModuleCreated(ModuleData InNewModuleData)
+        public void OnNewModuleCreated(ModuleData InNewModuleData)
         {
+            //Create a new Filespec list for potential checkouts
+            List<Perforce.P4.FileSpec> NewFiles = new List<Perforce.P4.FileSpec>();
+
             ModuleView NewModuleView = new ModuleView(InNewModuleData);
             NewModuleView.Dock = DockStyle.Top;
             
             ModuleViewPanel.Controls.Add(NewModuleView);
             ProjectWorker.AddModuleToProxy(InNewModuleData);
 
-            ZipFile.ExtractToDirectory(ProjectWorker.EmptyModuleFiles, Path.Combine(ProjectWorker.SourceDirectory, "Runtime"));
-            
-            string NewDirectoryName = Path.Combine(ProjectWorker.SourceDirectory, InNewModuleData.Type, InNewModuleData.Name);
-            //Directory.CreateDirectory(NewDirectoryName);
-
-            Directory.Move(Path.Combine(ProjectWorker.SourceDirectory, "Runtime", EmptyModuleToken), NewDirectoryName);
-
-            string[] Files = Directory.GetFiles(NewDirectoryName);
-
-            foreach (string CurrFile in Files)
+            try
             {
-                string text = File.ReadAllText(CurrFile);
-                text = text.Replace(EmptyModuleToken, InNewModuleData.Name);
-                File.WriteAllText(CurrFile, text);
+                ZipFile.ExtractToDirectory(ProjectWorker.EmptyModuleFiles, Path.Combine(ProjectWorker.SourceDirectory, "Runtime"));
 
-                System.IO.File.Move(CurrFile, CurrFile.Replace(EmptyModuleToken, InNewModuleData.Name));
-            }
+                string NewDirectoryName = Path.Combine(ProjectWorker.SourceDirectory, InNewModuleData.Type, InNewModuleData.Name);
 
-            if (InNewModuleData.Type == "Runtime")
-            {
-                string[] PrimaryBuildFileContents = File.ReadAllLines(ProjectWorker.PrimaryGameplayBuildFile);
-                List<string> ContentsAsList = new List<string>();
-                ContentsAsList = PrimaryBuildFileContents.ToList<string>();
+                Directory.Move(Path.Combine(ProjectWorker.SourceDirectory, "Runtime", EmptyModuleToken), NewDirectoryName);
 
-                //Existing PrivateDependancy block
-                int InjectionIndex = ContentsAsList.FindIndex(
-                delegate (string Line)
+                string[] Files = Directory.GetFiles(NewDirectoryName);
+
+                foreach (string CurrFile in Files)
                 {
-                    return Line.Contains(@"PrivateDependencyModuleNames");
-                });
+                    string text = File.ReadAllText(CurrFile);
+                    text = text.Replace(EmptyModuleToken, InNewModuleData.Name);
+                    File.WriteAllText(CurrFile, text);
 
-                if (InjectionIndex > -1)
-                {
-                    if (ContentsAsList[InjectionIndex + 1].Contains(@"{"))
-                    {
-                        InjectionIndex++;
-                    }
+                    string NewFileName = CurrFile.Replace(EmptyModuleToken, InNewModuleData.Name);
+                    System.IO.File.Move(CurrFile, NewFileName);
 
-                    //Add one to add the line after the injection index
-                    ContentsAsList.Insert(InjectionIndex + 1, '\u0022' + InNewModuleData.Name + '\u0022' + ",");
+                    Perforce.P4.FileSpec NewFileSpec = new Perforce.P4.FileSpec(new Perforce.P4.LocalPath(NewFileName));
+                    NewFiles.Add(NewFileSpec);
                 }
-                else
+
+                if (InNewModuleData.Type == "Runtime")
                 {
-                    int StartOfConstructorLine = ContentsAsList.FindIndex(
+                    string[] PrimaryBuildFileContents = File.ReadAllLines(ProjectWorker.PrimaryGameplayBuildFile);
+                    List<string> ContentsAsList = new List<string>();
+                    ContentsAsList = PrimaryBuildFileContents.ToList<string>();
+
+                    //Existing PrivateDependancy block
+                    int InjectionIndex = ContentsAsList.FindIndex(
                     delegate (string Line)
                     {
-                        return Line.Contains(@"public " + ProjectWorker.PrimaryModuleName);
+                        return Line.Contains(@"PrivateDependencyModuleNames");
                     });
 
-                    if (StartOfConstructorLine > -1)
+                    if (InjectionIndex > -1)
                     {
-                        if (ContentsAsList[StartOfConstructorLine + 1].Contains(@"{"))
+                        if (ContentsAsList[InjectionIndex + 1].Contains(@"{"))
                         {
-                            StartOfConstructorLine++;
+                            InjectionIndex++;
                         }
 
-                        ContentsAsList.Insert(StartOfConstructorLine + 1, @"PrivateDependencyModuleNames.AddRange(new string[]");
-                        ContentsAsList.Insert(StartOfConstructorLine + 2, @"{");
-                        ContentsAsList.Insert(StartOfConstructorLine + 3, '\u0022' + InNewModuleData.Name + '\u0022' + ",");
-                        ContentsAsList.Insert(StartOfConstructorLine + 4, @"});");
+                        //Add one to add the line after the injection index
+                        ContentsAsList.Insert(InjectionIndex + 1, '\u0022' + InNewModuleData.Name + '\u0022' + ",");
                     }
+                    else
+                    {
+                        int StartOfConstructorLine = ContentsAsList.FindIndex(
+                        delegate (string Line)
+                        {
+                            return Line.Contains(@"public " + ProjectWorker.PrimaryModuleName);
+                        });
+
+                        if (StartOfConstructorLine > -1)
+                        {
+                            if (ContentsAsList[StartOfConstructorLine + 1].Contains(@"{"))
+                            {
+                                StartOfConstructorLine++;
+                            }
+
+                            ContentsAsList.Insert(StartOfConstructorLine + 1, @"PrivateDependencyModuleNames.AddRange(new string[]");
+                            ContentsAsList.Insert(StartOfConstructorLine + 2, @"{");
+                            ContentsAsList.Insert(StartOfConstructorLine + 3, '\u0022' + InNewModuleData.Name + '\u0022' + ",");
+                            ContentsAsList.Insert(StartOfConstructorLine + 4, @"});");
+                        }
+                    }
+
+                    System.IO.FileInfo PrimaryBuildFileInfo = new System.IO.FileInfo(ProjectWorker.PrimaryGameplayBuildFile);
+                    PrimaryBuildFileInfo.IsReadOnly = false;
+                    File.WriteAllLines(ProjectWorker.PrimaryGameplayBuildFile, ContentsAsList.ToArray());
                 }
 
-                File.WriteAllLines(ProjectWorker.PrimaryGameplayBuildFile, ContentsAsList.ToArray());
-            }
+                System.IO.FileInfo ProjectFileInfo = new System.IO.FileInfo(ProjectWorker.ProjectFile);
+                ProjectFileInfo.IsReadOnly = false;
+                SaveProject();
 
-            SaveProject();
+                //Create a CL for our new files
+                if (ProjectWorker.ConnectedRepo != null)
+                {
+                    Perforce.P4.Changelist NewChangelist = new Perforce.P4.Changelist();
+                    NewChangelist.Type = ChangeListType.Restricted;
+                    NewChangelist.Description = "[Modules] Created " + InNewModuleData.Name + " module";
+                    Perforce.P4.Changelist CreatedChangelist = ProjectWorker.ConnectedRepo.CreateChangelist(NewChangelist);
+
+                    Perforce.P4.Options EditOptions = new Perforce.P4.Options();
+                    EditOptions["-c"] = String.Format("{0}", CreatedChangelist.Id);
+                    ProjectWorker.ConnectedRepo.Connection.Client.AddFiles(EditOptions, NewFiles.ToArray());
+
+                    ProjectWorker.ConnectedRepo.Connection.Client.EditFiles(EditOptions, new Perforce.P4.FileSpec[] 
+                    { 
+                        new Perforce.P4.LocalPath(ProjectWorker.ProjectFile.Replace("//", "/")),
+                        new Perforce.P4.LocalPath(ProjectWorker.PrimaryGameplayBuildFile.Replace("//", "/"))
+                    });
+                }
+            }
+            catch (Exception e)
+            {
+                MessageBox.Show(e.Message);
+            }
         }
 
         private int GetDependencyInjectionLine(List<string> InContent)
@@ -721,13 +804,42 @@ namespace UnrealProjectTool
             return Color.FromArgb(RNG.Next(0, 255), RNG.Next(0, 255), RNG.Next(0, 255));
         }
 
-        private void MainForm_Shown(Object sender, EventArgs e)
+        public static Form MakeTextPrompt(string InPromptText)
         {
-            string path = Settings.Default.SavedLastProjectPath;
-            if (path != "")
+            Form NewPromptForm = new Form();
+
+            Label Prompt = new Label();
+            Prompt.Text = InPromptText;
+            NewPromptForm.Controls.Add(Prompt);
+
+            Button ConfirmButton = new Button();
+            ConfirmButton.Text = "Ok";
+            NewPromptForm.Controls.Add(ConfirmButton);
+
+            return NewPromptForm;
+        }
+
+        public static string ShowDialog(string text, string caption)
+        {
+            Form prompt = new Form()
             {
-                SetupProjectWorker(path);
-            }
+                Width = 500,
+                Height = 150,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                Text = caption,
+                StartPosition = FormStartPosition.CenterScreen
+            };
+
+            Label textLabel = new Label() { Left = 50, Top = 20, Text = text };
+            TextBox textBox = new TextBox() { Left = 50, Top = 50, Width = 400 };
+            Button confirmation = new Button() { Text = "Ok", Left = 350, Width = 100, Top = 70, DialogResult = DialogResult.OK };
+            confirmation.Click += (sender, e) => { prompt.Close(); };
+            prompt.Controls.Add(textBox);
+            prompt.Controls.Add(confirmation);
+            prompt.Controls.Add(textLabel);
+            prompt.AcceptButton = confirmation;
+
+            return prompt.ShowDialog() == DialogResult.OK ? textBox.Text : "";
         }
     }
 }
