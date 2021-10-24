@@ -315,7 +315,6 @@ namespace UnrealProjectTool
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Unreal Project Tool";
-            this.Load += new System.EventHandler(this.MainForm_Load);
             this.Shown += new System.EventHandler(this.MainForm_Shown);
             this.MainFormLayoutPanel.ResumeLayout(false);
             this.MainFormLayoutPanel.PerformLayout();
@@ -793,10 +792,6 @@ namespace UnrealProjectTool
                 }
             }
         }
-
-        private Form SourceScanOutput = new Form();
-        private UProjectWorker ProjectWorker;
-        static string EmptyModuleToken = @"Empty";
 
         private Color GetColour()
         {
